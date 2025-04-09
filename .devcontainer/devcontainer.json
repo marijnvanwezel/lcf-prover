@@ -1,0 +1,51 @@
+{
+  "name": "DevContainer for Haskell (GHC, Stack, Cabal, HIE, LSP, DAP, etc.)",
+  "runArgs": [],
+  "image": "ghcr.io/marijnvanwezel/haskell-dev-env:master",
+  "postStartCommand": "nohup bash -c 'hoogle server --port=23196 --local &' > /dev/null 2>&1",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "haskell.haskell",
+        "phoityne.phoityne-vscode",
+        "eriksik2.vscode-ghci",
+        "jcanero.hoogle-vscode",
+        "dmarticus.hackage-theme",
+        "streetsidesoftware.code-spell-checker",
+        "yzhang.markdown-all-in-one",
+        "redhat.vscode-yaml",
+        "tomoki1207.pdf"
+      ],
+      "settings": {
+        "files.exclude": {
+          "**/*.olean": true,
+          "**/.DS_Store": true,
+          "**/.git": true,
+          "**/.hg": true,
+          "**/.svn": true,
+          "**/CVS": true
+        },
+        "haskell.checkProject": true,
+        "haskell.formattingProvider": "ormolu",
+        "haskell.indentationRules.enabled": true,
+        "haskell.liquidOn": false,
+        "haskell.checkParents": "CheckOnSave",
+        "haskell.manageHLS": "GHCup",
+        "haskell.maxCompletions": 40,
+        "haskell.openDocumentationInHackage": false,
+        "haskell.openSourceInHackage": false,
+        "haskell.trace.client": "error",
+        "haskell.trace.server": "off",
+        "haskell.upgradeGHCup": false,
+        "haskell.plugin.hlint.codeActionsOn": true,
+        "haskell.plugin.hlint.diagnosticsOn": true,
+        "haskell.plugin.ormolu.config.external": true,
+        "haskell.plugin.rename.config.crossModule": true,
+        "hoogle-vscode.maxResults": 250,
+        "hoogle-vscode.url": "http://127.0.0.1:23196",
+        "haskellShell.ghci.arguments": ["ghci"],
+        "haskellShell.ghci.executablePath": "stack"
+      }
+    }
+  }
+}
