@@ -1,7 +1,10 @@
 module Main where
 
 import Data.Set (Set)
+
 import qualified Data.Set as Set
+
+data Error = EliminationError
 
 ------------------------
 -- 1. Inference rules --
@@ -14,6 +17,7 @@ data Formula
 
 data Theorem
   = Theorem !(Set Formula) !Formula -- Γ ⊢ A
+  deriving (Eq, Ord)
 
 --
 -- ─────
@@ -42,26 +46,50 @@ elimRule (Theorem gamma imp) (Theorem delta a) = case imp of
 -- 2. Goal-directed proof state --
 ----------------------------------
 
-data Goal = Todo
+type Justification = [Theorem] -> Theorem
+type Tactic = Goal -> Maybe GoalState
 
-data GoalState = Todo2
+newtype Goal = Goal Theorem
+  deriving (Eq, Ord)
 
-data Tactic = Todo3
+data GoalState 
+  = GoalState
+  { goals :: ![Goal]
+  , justification :: !Justification
+  }
 
-by :: Tactic -> GoalState -> GoalState
-by = undefined
+-- Applies the given tactic to the first goal in the goal state.
+by :: Tactic -> GoalState -> Maybe GoalState
+-- "No more goals."
+by tactic state = case goals state of
+  [] -> Nothing
+  (g:gs) -> do
+    state' <- tactic g
+    
+    undefined --TODO
 
 ----------------
 -- 3. Tactics --
 ----------------
 
 assumption :: Tactic
-assumption = undefined
+assumption (Goal (Theorem gamma a))
+  | Set.member a gamma = Just $ GoalState 
+      { goals = []
+      , justification = \_ -> assume a
+      }
+  | otherwise = Nothing
 
 introTactic :: Tactic
-introTactic = undefined
+introTactic (Goal (Theorem gamma (VarF _))) = Nothing
+introTactic (Goal (Theorem gamma (ImpF a b))) = do
+  let gamma' = Set.insert a gamma
+  Just $ GoalState 
+    { goals = [Goal (Theorem gamma' b)]
+    , justification = undefined -- TODO
+    }
 
-elimTactic :: Tactic
+elimTactic :: Formula -> Tactic
 elimTactic = undefined
 
 -----------------
