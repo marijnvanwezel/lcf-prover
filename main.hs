@@ -3,8 +3,7 @@ module Main where
 import Data.Set (Set)
 
 import qualified Data.Set as Set
-
-data Error = EliminationError
+import Data.List (find)
 
 ------------------------
 -- 1. Inference rules --
@@ -46,7 +45,7 @@ elimRule (Theorem gamma imp) (Theorem delta a) = case imp of
 -- 2. Goal-directed proof state --
 ----------------------------------
 
-type Justification = [Theorem] -> Theorem
+type Justification = [Theorem] -> Maybe Theorem
 type Tactic = Goal -> Maybe GoalState
 
 newtype Goal = Goal Theorem
@@ -58,28 +57,30 @@ data GoalState
   , justification :: !Justification
   }
 
+proves :: Theorem -> Formula -> Bool
+proves (Theorem _ a) b = a == b
+
 -- Applies the given tactic to the first goal in the goal state.
 by :: Tactic -> GoalState -> Maybe GoalState
 by tactic curState = case goals curState of
   -- No goals left to prove.
   [] -> Nothing
   (goal:rest) -> do
-    -- Apply the tactic to the top goal.
     newState <- tactic goal
-
-    -- The new goals are the goals returned by the tactic, and the remaining goals.
-    let combinedGoals = goals newState ++ rest
     
+    return $ GoalState
+      { goals = goals newState ++ rest
+      , justification = combineJustification newState
+      }
+  
+  where
     -- The new justification first applies the new justification to the new goals, and then the old
     -- justification to the result of the new justification and the remaining goals.
     -- FIXME (2025-05-26): Perhaps we can simply use [goals newState] and [goals curState] instead of the splitAt?
-    let combinedJustification thms = let (topGoals, remainingGoals) = splitAt (length $ goals newState) thms in
-                                         justification curState (justification newState topGoals : remainingGoals)
-    
-    return $ GoalState 
-      { goals = combinedGoals
-      , justification = combinedJustification
-      }
+    combineJustification newState thms = do 
+      let (topGoals, remainingGoals) = splitAt (length $ goals newState) thms
+      thm <- justification newState topGoals
+      justification curState (thm : remainingGoals)
 
 ----------------
 -- 3. Tactics --
@@ -89,21 +90,42 @@ assumption :: Tactic
 assumption (Goal (Theorem gamma a))
   | Set.member a gamma = Just $ GoalState 
       { goals = []
-      , justification = \_ -> assume a
+      , justification = \_ -> return $ assume a
       }
   | otherwise = Nothing
 
 introTactic :: Tactic
 introTactic (Goal (Theorem gamma (VarF _))) = Nothing
 introTactic (Goal (Theorem gamma (ImpF a b))) = do
-  let gamma' = Set.insert a gamma
-  Just $ GoalState 
-    { goals = [Goal (Theorem gamma' b)]
-    , justification = undefined -- TODO
+  let newGamma = Set.insert a gamma
+  let subGoals = [Goal (Theorem newGamma b)]
+
+  return $ GoalState 
+    { goals = subGoals
+    , justification = justification'
     }
 
+  where
+    justification' thms = do
+      thm <- find (`proves` b) thms
+      return $ introRule a thm
+
 elimTactic :: Formula -> Tactic
-elimTactic = undefined
+elimTactic assm (Goal (Theorem gamma a)) = do
+  let imp = ImpF assm a -- A → B
+  let impThm = Theorem gamma imp -- Γ ⊢ A → B
+  let assmThm = Theorem gamma assm -- Γ ⊢ A
+
+  return $ GoalState
+    { goals = [Goal impThm, Goal assmThm]
+    , justification = justification' imp assm
+    }
+
+  where
+    justification' imp assm thms = do
+      impThm <- find (`proves` imp) thms
+      assmThm <- find (`proves` assm) thms
+      elimRule impThm assmThm
 
 -----------------
 -- 4. Commands --
