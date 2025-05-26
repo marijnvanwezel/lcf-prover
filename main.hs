@@ -60,13 +60,26 @@ data GoalState
 
 -- Applies the given tactic to the first goal in the goal state.
 by :: Tactic -> GoalState -> Maybe GoalState
--- "No more goals."
-by tactic state = case goals state of
+by tactic curState = case goals curState of
+  -- No goals left to prove.
   [] -> Nothing
-  (g:gs) -> do
-    state' <- tactic g
+  (goal:rest) -> do
+    -- Apply the tactic to the top goal.
+    newState <- tactic goal
+
+    -- The new goals are the goals returned by the tactic, and the remaining goals.
+    let combinedGoals = goals newState ++ rest
     
-    undefined --TODO
+    -- The new justification first applies the new justification to the new goals, and then the old
+    -- justification to the result of the new justification and the remaining goals.
+    -- FIXME (2025-05-26): Perhaps we can simply use [goals newState] and [goals curState] instead of the splitAt?
+    let combinedJustification thms = let (topGoals, remainingGoals) = splitAt (length $ goals newState) thms in
+                                         justification curState (justification newState topGoals : remainingGoals)
+    
+    return $ GoalState 
+      { goals = combinedGoals
+      , justification = combinedJustification
+      }
 
 ----------------
 -- 3. Tactics --
