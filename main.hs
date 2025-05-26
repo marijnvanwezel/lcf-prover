@@ -1,23 +1,36 @@
 module Main where
 
+import Data.List (find, intercalate)
+import Data.Maybe (listToMaybe)
 import Data.Set (Set)
+import System.IO (hFlush, stdout)
+import Text.Read (readMaybe)
 
 import qualified Data.Set as Set
-import Data.List (find)
-import Data.Maybe (listToMaybe)
+
+-- A simple LCF-style theorem prover in Haskell.
 
 ------------------------
 -- 1. Inference rules --
 ------------------------
 
 data Formula
-  = VarF !Int              -- x₁, x₂, ...
-  | ImpF !Formula !Formula -- A → B
-  deriving (Eq, Ord)
+  = Var !String           -- x₁, x₂, ...
+  | Imp !Formula !Formula -- A → B
+  deriving (Eq, Ord, Read)
+
+instance Show Formula where
+  show (Var x) = x
+  show (Imp a b) = "(" ++ show a ++ " → " ++ show b ++ ")"
 
 data Theorem
   = Theorem !(Set Formula) !Formula -- Γ ⊢ A
-  deriving (Eq, Ord)
+  deriving (Eq, Ord, Read)
+
+instance Show Theorem where
+  show (Theorem gamma a) =
+    let gammaStr = if Set.null gamma then "∅" else intercalate "," (map show $ Set.toList gamma)
+    in gammaStr ++ " ⊢ " ++ show a
 
 --
 -- ─────
@@ -29,16 +42,16 @@ assume a = Theorem (Set.singleton a) a
 -- ───────────────
 -- Γ - {A} ⊢ A → B
 introRule :: Formula -> Theorem -> Theorem
-introRule a (Theorem gamma b) = Theorem (gamma `Set.difference` Set.singleton a) (ImpF a b)
+introRule a (Theorem gamma b) = Theorem (gamma `Set.difference` Set.singleton a) (Imp a b)
 
 -- Γ ⊢ A → B  Δ ⊢ A
 -- ────────────────
 --    Γ ∪ Δ ⊢ B
 elimRule :: Theorem -> Theorem -> Maybe Theorem
 elimRule (Theorem gamma imp) (Theorem delta a) = case imp of
-  VarF _ -> Nothing
-  ImpF _ b ->
-    if imp == ImpF a b
+  Var _ -> Nothing
+  Imp _ b ->
+    if imp == Imp a b
       then Just $ Theorem (gamma `Set.union` delta) b
       else Nothing
 
@@ -50,7 +63,10 @@ type Justification = [Theorem] -> Maybe Theorem
 type Tactic = Goal -> Maybe GoalState
 
 newtype Goal = Goal Theorem
-  deriving (Eq, Ord)
+  deriving (Eq, Ord, Read)
+
+instance Show Goal where
+  show (Goal thm) = show thm
 
 data GoalState
   = GoalState
@@ -96,8 +112,8 @@ assumption (Goal (Theorem gamma a))
   | otherwise = Nothing
 
 introTactic :: Tactic
-introTactic (Goal (Theorem gamma (VarF _))) = Nothing
-introTactic (Goal (Theorem gamma (ImpF a b))) = do
+introTactic (Goal (Theorem gamma (Var _))) = Nothing
+introTactic (Goal (Theorem gamma (Imp a b))) = do
   let newGamma = Set.insert a gamma
   let subGoals = [Goal (Theorem newGamma b)]
 
@@ -113,7 +129,7 @@ introTactic (Goal (Theorem gamma (ImpF a b))) = do
 
 elimTactic :: Formula -> Tactic
 elimTactic assm (Goal (Theorem gamma a)) = do
-  let imp = ImpF assm a -- A → B
+  let imp = Imp assm a -- A → B
   let impThm = Theorem gamma imp -- Γ ⊢ A → B
   let assmThm = Theorem gamma assm -- Γ ⊢ A
 
@@ -133,44 +149,133 @@ elimTactic assm (Goal (Theorem gamma a)) = do
 -----------------
 
 type History = [GoalState]
+type Result a = Either String a
 
 -- Get the current goal state, if it exists.
-currentState :: History -> Maybe GoalState
-currentState = listToMaybe
+currentState :: History -> Result GoalState
+currentState hist = case hist of
+  [] -> Left "No current goal state."
+  (x:_) -> Right x
 
 -- Set the current goal.
-g :: History -> Formula -> Maybe (Goal, History)
+g :: History -> Formula -> Result History
 g hist form = do
   let goal = Goal $ Theorem Set.empty form
   case currentState hist of
-    Nothing -> return (goal, [GoalState { goals = [goal], justification = listToMaybe }])
-    Just goalState ->
+    Left _ -> return [GoalState { goals = [goal], justification = listToMaybe }]
+    Right goalState ->
       let newState = GoalState
             { goals = goal : goals goalState
             , justification = justification goalState
             }
-      in return (goal, newState : hist)
+      in return $ newState : hist
 
 -- Return the current goal.
-p :: History -> Maybe (Goal, History)
+p :: History -> Result (Goal, History)
 p hist = do
   goalState <- currentState hist
-  goal <- listToMaybe $ goals goalState
-  return (goal, hist)
+  case listToMaybe $ goals goalState of
+    Nothing -> Left "QED."
+    Just goal -> Right (goal, hist)
 
 -- Apply a tactic to the current goal.
-e :: History -> Tactic -> Maybe (Goal, History)
+e :: History -> Tactic -> Result History
 e hist tac = do
   curState <- currentState hist
-  newState <- by tac curState
-  p (newState : hist)
+  case by tac curState of
+    Nothing -> Left "Failed to apply tactic."
+    Just newState -> Right (newState : hist)
 
 -- Undo the last tactic.
-b :: History -> Maybe (Goal, History)
+b :: History -> Result History
 b hist = do
   case hist of
-    (_ : oldHist) -> p oldHist
-    [] -> p hist
+    (_ : oldHist) -> Right oldHist
+    [] -> Left "No previous goal state to revert to."
+
+------------------------------
+-- 5. Interactive interface --
+------------------------------
+
+splitFirst :: String -> (String, String)
+splitFirst str = case words str of
+  [] -> ("", "")
+  (x:xs) -> (x, unwords xs)
 
 main :: IO ()
-main = undefined
+main = do
+  putStrLn "LCF-style theorem prover"
+  putStrLn "Type 'help' for a list of commands."
+  loop [] -- The empty list denotes the initial history (which is empty)
+
+  where
+    loop :: History -> IO ()
+    loop hist = do
+      putStr "> " >> hFlush stdout
+      input <- getLine
+
+      case splitFirst input of
+        ("help", rest) -> handleHelpCommand hist rest
+        ("quit", rest) -> handleQuitCommand hist rest
+        ("g", rest) -> handleGCommand hist rest
+        ("p", rest) -> handlePCommand hist rest
+        ("e", rest) -> handleECommand hist rest
+        ("b", rest) -> handleBCommand hist rest
+
+        -- Catch-all for unknown commands.
+        (cmd, rest) -> putStrLn ("Unknown command '" <> cmd <> "'. Type 'help' for a list of commands.") >> loop hist
+
+    handleHelpCommand hist input = case input of
+      "" -> do
+        putStrLn "Available commands:"
+        putStrLn "  g <formula> - Set the current goal to the given formula."
+        putStrLn "  p - Print the current goal."
+        putStrLn "  e <tactic> - Apply a tactic to the current goal."
+        putStrLn "  b - Undo the last tactic."
+        putStrLn "  quit - Exit the prover."
+        putStrLn "  help - Show this help message."
+        putStrLn ""
+        putStrLn "<tactic> ::= 'intro' | 'elim' , <formula> | 'assumption'"
+        putStrLn "<formula> ::= 'Var' , <string> | 'Imp' , <formula> , <formula> | '(' , <formula> , ')'"
+        putStrLn "<string> ::= '\"' , ? any sequence of characters ? , '\"'"
+        loop hist
+      _ -> putStrLn "Unexpected input for 'help' command. Usage: 'help'" >> loop hist
+
+    handleQuitCommand hist input = case input of
+      "" -> putStrLn "Exiting the prover. Goodbye!"
+      _ -> putStrLn "Unexpected input for 'quit' command. Usage: 'quit'" >> loop hist
+
+    handleGCommand hist input = case readMaybe input :: Maybe Formula of
+      Nothing -> putStrLn "Invalid formula." >> loop hist
+      Just form -> case g hist form of
+        Left err -> putStrLn err >> loop hist
+        Right newHist -> handlePCommand newHist "" >> loop newHist
+
+    handlePCommand hist "" = case p hist of
+      Left err -> putStrLn err >> loop hist
+      Right (goal, newHist) -> do
+        print goal
+        loop newHist
+
+    handlePCommand hist _input = putStrLn "Unexpected input for 'p' command. Usage: 'p'" >> loop hist
+
+    handleECommand hist input = case tacticFun of
+      Nothing -> putStrLn "Invalid tactic." >> loop hist
+      Just tacticFun -> case e hist tacticFun of
+        Left err -> putStrLn err >> loop hist
+        Right newHist -> handlePCommand newHist "" >> loop newHist
+
+      where
+        tacticFun = case splitFirst input of
+          ("intro", rest) -> return introTactic
+          ("elim", rest) -> do
+            form <- readMaybe rest :: Maybe Formula
+            return $ elimTactic form
+          ("assumption", _) -> return assumption
+          _input -> Nothing
+
+    handleBCommand hist "" = case b hist of
+      Left err -> putStrLn err >> loop hist
+      Right newHist -> handlePCommand newHist "" >> loop newHist
+
+    handleBCommand hist _input = putStrLn "Unexpected input for 'b' command. Usage: 'b'" >> loop hist
