@@ -29,8 +29,8 @@ data Theorem
 
 instance Show Theorem where
   show (Theorem gamma a) =
-    let gammaStr = if Set.null gamma then "∅" else intercalate "," (map show $ Set.toList gamma)
-    in gammaStr ++ " ⊢ " ++ show a
+    let gammaStr = if Set.null gamma then "" else intercalate "\n" (map show $ Set.toList gamma) ++ "\n"
+    in gammaStr ++ "______________________________________Goal\n" ++ show a
 
 --
 -- ─────
@@ -161,14 +161,14 @@ currentState hist = case hist of
 g :: History -> Formula -> Result History
 g hist form = do
   let goal = Goal $ Theorem Set.empty form
-  case currentState hist of
-    Left _ -> return [GoalState { goals = [goal], justification = listToMaybe }]
-    Right goalState ->
-      let newState = GoalState
-            { goals = goal : goals goalState
-            , justification = justification goalState
-            }
-      in return $ newState : hist
+  return [GoalState { goals = [goal], justification = listToMaybe }]
+
+top :: History -> Result (Theorem, History)
+top hist = do
+  goalState <- currentState hist
+  case justification goalState [] of
+    Nothing -> Left "Theorem not yet proven."
+    Just thm -> Right (thm, hist)
 
 -- Return the current goal.
 p :: History -> Result (Goal, History)
@@ -216,7 +216,7 @@ main = do
 
       case splitFirst input of
         ("help", rest) -> handleHelpCommand hist rest
-        ("quit", rest) -> handleQuitCommand hist rest
+        ("top", rest) -> handleTopCommand hist rest
         ("g", rest) -> handleGCommand hist rest
         ("p", rest) -> handlePCommand hist rest
         ("e", rest) -> handleECommand hist rest
@@ -228,22 +228,24 @@ main = do
     handleHelpCommand hist input = case input of
       "" -> do
         putStrLn "Available commands:"
-        putStrLn "  g <formula> - Set the current goal to the given formula."
-        putStrLn "  p - Print the current goal."
-        putStrLn "  e <tactic> - Apply a tactic to the current goal."
-        putStrLn "  b - Undo the last tactic."
-        putStrLn "  quit - Exit the prover."
-        putStrLn "  help - Show this help message."
+        putStrLn "  g <formula>  Set the current goal to the given formula."
+        putStrLn "  p            Print the current goal."
+        putStrLn "  e <tactic>   Apply a tactic to the current goal."
+        putStrLn "  b            Undo the last tactic."
+        putStrLn "  top          Show the proven theorem."
+        putStrLn "  help         Show this help message."
         putStrLn ""
-        putStrLn "<tactic> ::= 'intro' | 'elim' , <formula> | 'assumption'"
-        putStrLn "<formula> ::= 'Var' , <string> | 'Imp' , <formula> , <formula> | '(' , <formula> , ')'"
-        putStrLn "<string> ::= '\"' , ? any sequence of characters ? , '\"'"
+        putStrLn "<tactic>  ::= 'intro' | 'elim' , <formula> | 'assumption' ;"
+        putStrLn "<formula> ::= 'Var' , <string> | 'Imp' , <formula> , <formula> | '(' , <formula> , ')' ;"
+        putStrLn "<string>  ::= '\"' , ? any sequence of characters ? , '\"' ;"
         loop hist
       _ -> putStrLn "Unexpected input for 'help' command. Usage: 'help'" >> loop hist
 
-    handleQuitCommand hist input = case input of
-      "" -> putStrLn "Exiting the prover. Goodbye!"
-      _ -> putStrLn "Unexpected input for 'quit' command. Usage: 'quit'" >> loop hist
+    handleTopCommand hist input = case top hist of
+      Left err -> putStrLn err >> loop hist
+      Right (thm, newHist) -> do
+        print thm
+        loop newHist
 
     handleGCommand hist input = case readMaybe input :: Maybe Formula of
       Nothing -> putStrLn "Invalid formula." >> loop hist
